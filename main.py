@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+"""
+Ghostty Build Script
+
+This script downloads, validates, and builds the Ghostty terminal application
+using Zig as the build dependency.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+import zipfile
+from pathlib import Path
+
+# Color codes for terminal output
+class Colors:
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+
+def log_info(message: str) -> None:
+    """Print info message with blue color."""
+    print(f"{Colors.BLUE}[INFO]{Colors.END} {message}")
+
+def log_success(message: str) -> None:
+    """Print success message with green color."""
+    print(f"{Colors.GREEN}[SUCCESS]{Colors.END} {message}")
+
+def log_warning(message: str) -> None:
+    """Print warning message with yellow color."""
+    print(f"{Colors.YELLOW}[WARNING]{Colors.END} {message}")
+
+def log_error(message: str) -> None:
+    """Print error message with red color."""
+    print(f"{Colors.RED}[ERROR]{Colors.END} {message}")
+
+def download_file(url: str, destination: Path, pull_always: bool = False) -> None:
+    """Download a file from URL to destination."""
+    # Check if file already exists
+    if destination.exists() and not pull_always:
+        log_info(f"File {destination.name} already exists, skipping download")
+        return
+
+    log_info(f"Downloading {url} to {destination}")
+    try:
+        urllib.request.urlretrieve(url, destination)
+        log_success(f"Downloaded {destination.name}")
+    except Exception as e:
+        log_error(f"Failed to download {url}: {e}")
+        sys.exit(1)
+
+def extract_tar_gz(archive_path: Path, extract_to: Path) -> None:
+    """Extract a .tar.gz file to the specified directory."""
+    log_info(f"Extracting {archive_path.name} to {extract_to}")
+    try:
+        with tarfile.open(archive_path, 'r:gz') as tar:
+            tar.extractall(extract_to)
+        log_success(f"Extracted {archive_path.name}")
+    except Exception as e:
+        log_error(f"Failed to extract {archive_path}: {e}")
+        sys.exit(1)
+
+def extract_tar_xz(archive_path: Path, extract_to: Path) -> None:
+    """Extract a .tar.xz file to the specified directory."""
+    log_info(f"Extracting {archive_path.name} to {extract_to}")
+    try:
+        with tarfile.open(archive_path, 'r:xz') as tar:
+            tar.extractall(extract_to)
+        log_success(f"Extracted {archive_path.name}")
+    except Exception as e:
+        log_error(f"Failed to extract {archive_path}: {e}")
+        sys.exit(1)
+
+def extract_zip(archive_path: Path, extract_to: Path) -> None:
+    """Extract a .zip file to the specified directory."""
+    log_info(f"Extracting {archive_path.name} to {extract_to}")
+    try:
+        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_to)
+        log_success(f"Extracted {archive_path.name}")
+    except Exception as e:
+        log_error(f"Failed to extract {archive_path}: {e}")
+        sys.exit(1)
+
+def validate_signature(archive_path: Path, signature_path: Path, public_key: str) -> bool:
+    """Validate the archive signature using minisign."""
+    log_info("Validating signature...")
+
+    # Check if minisign is available
+    try:
+        subprocess.run(['minisign', '-v'], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        log_error("minisign is not installed. Please install it to validate signatures.")
+        log_info("On Ubuntu/Debian: sudo apt install minisign")
+        log_info("On Fedora: sudo dnf install minisign")
+        log_info("On macOS: brew install minisign")
+        sys.exit(1)
+
+    try:
+        # Create a temporary file for the public key
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.pub', delete=False) as key_file:
+            key_file.write(public_key)
+            key_file_path = key_file.name
+
+        # Debug: show the public key content
+        log_info(f"Using public key: {public_key[:50]}...")
+
+        # Validate the signature
+        result = subprocess.run([
+            'minisign', '-V', '-p', key_file_path, '-m', str(archive_path)
+        ], capture_output=True, text=True)
+
+        # Clean up the temporary key file
+        os.unlink(key_file_path)
+
+        if result.returncode == 0:
+            log_success("Signature validation passed")
+            return True
+        else:
+            log_error(f"Signature validation failed: {result.stderr}")
+            log_error(f"minisign stdout: {result.stdout}")
+            return False
+
+    except Exception as e:
+        log_error(f"Error during signature validation: {e}")
+        return False
+
+def setup_zig(compiler_dir: Path, pull_always: bool = False) -> None:
+    """Download and setup Zig compiler if not already present."""
+    zig_binary = compiler_dir / "zig"
+
+    if zig_binary.exists() and not pull_always:
+        log_info("Zig compiler already exists, skipping download")
+        return
+
+    log_info("Setting up Zig compiler...")
+
+    # Create compiler directory
+    compiler_dir.mkdir(exist_ok=True)
+
+    # Download Zig
+    zig_url = "https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz"
+    zig_archive = compiler_dir / "zig.tar.xz"
+
+    download_file(zig_url, zig_archive, pull_always)
+
+    # Extract Zig
+    extract_tar_xz(zig_archive, compiler_dir)
+    # Move zig binary and lib directory to the correct location
+    extracted_dir = compiler_dir / "zig-x86_64-linux-0.14.1"
+    if extracted_dir.exists():
+        # Move zig binary
+        zig_src = extracted_dir / "zig"
+        if zig_src.exists():
+            zig_src.rename(zig_binary)
+
+        # Move lib directory
+        lib_src = extracted_dir / "lib"
+        lib_dst = compiler_dir / "lib"
+        if lib_src.exists():
+            if lib_dst.exists():
+                import shutil
+                shutil.rmtree(lib_dst)
+            lib_src.rename(lib_dst)
+
+        # Clean up extracted directory
+        import shutil
+        shutil.rmtree(extracted_dir)
+
+    # Clean up archive
+    zig_archive.unlink()
+
+    log_success("Zig compiler setup complete")
+
+def build_ghostty(ghostty_dir: Path, compiler_dir: Path) -> None:
+    """Build Ghostty using Zig."""
+    log_info("Building Ghostty...")
+
+    # Set up environment
+    env = os.environ.copy()
+    env['PATH'] = f"{compiler_dir}:{env.get('PATH', '')}"
+
+    # Change to ghostty directory
+    original_cwd = os.getcwd()
+    os.chdir(ghostty_dir)
+
+    try:
+        # Run the build command
+        result = subprocess.run([
+            'zig', 'build', '-p', str(Path.home() / '.local'), '-Doptimize=ReleaseFast',
+        ], env=env, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            log_error("Build failed!")
+            log_error(result.stderr)
+            sys.exit(1)
+
+        log_success("Build completed successfully")
+
+    finally:
+        os.chdir(original_cwd)
+
+def install_desktop_file(ghostty_dir: Path) -> None:
+    """Copy and configure the desktop file for Ghostty."""
+    log_info("Installing desktop file...")
+
+    # Source desktop file
+    source_desktop = ghostty_dir / "dist" / "linux" / "app.desktop.in"
+    if not source_desktop.exists():
+        log_error(f"Desktop file not found at {source_desktop}")
+        return
+
+    # Destination directory
+    applications_dir = Path.home() / '.local' / 'share' / 'applications'
+    applications_dir.mkdir(parents=True, exist_ok=True)
+
+    # Destination file
+    dest_desktop = applications_dir / "ghostty.desktop"
+
+    try:
+        # Read source file
+        with open(source_desktop, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Replace placeholders
+        ghostty_path = str(Path.home() / '.local' / 'bin' / 'ghostty')
+        content = content.replace('@GHOSTTY@', ghostty_path)
+        content = content.replace('@NAME@', 'Ghostty')
+        content = content.replace('@APPID@', 'com.mitchellh.ghostty')
+
+        # Write to destination
+        with open(dest_desktop, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        log_success(f"Desktop file installed to {dest_desktop}")
+
+    except Exception as e:
+        log_error(f"Failed to install desktop file: {e}")
+
+def verify_build() -> bool:
+    """Verify that the build artifacts are in $HOME/.local."""
+    local_dir = Path.home() / '.local'
+    bin_dir = local_dir / 'bin'
+
+    log_info("Verifying build artifacts...")
+
+    # Check if ghostty binary exists
+    ghostty_binary = bin_dir / 'ghostty'
+    if ghostty_binary.exists():
+        log_success(f"Ghostty binary found at {ghostty_binary}")
+        return True
+    else:
+        log_error(f"Ghostty binary not found at {ghostty_binary}")
+        return False
+
+def main():
+    """Main function."""
+    parser = argparse.ArgumentParser(
+        description='Build Ghostty terminal application',
+        epilog='''
+Examples:
+  %(prog)s                           # Build latest Ghostty (1.2.0)
+  %(prog)s 1.1.5                     # Build specific version
+  %(prog)s --skip-build              # Only download and extract source
+  %(prog)s --pull-always             # Force re-download all files
+  %(prog)s --skip-signature          # Skip signature validation
+  %(prog)s 1.2.0 --skip-build --pull-always  # Combine options
+
+The script downloads Ghostty source code, validates signatures, sets up Zig compiler,
+builds Ghostty, and installs it to $HOME/.local/bin.
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('version', nargs='?', default='1.2.0',
+                       help='Ghostty version to build (default: %(default)s)')
+    parser.add_argument('--pull-always', action='store_true',
+                       help='Always download files even if they already exist in the current directory')
+    parser.add_argument('--skip-signature', action='store_true',
+                       help='Skip signature validation (not recommended for security)')
+    parser.add_argument('--skip-build', action='store_true',
+                       help='Skip build and installation steps (only download and extract source code)')
+
+    args = parser.parse_args()
+    version = args.version
+    pull_always = args.pull_always
+    skip_signature = args.skip_signature
+    skip_build = args.skip_build
+
+    log_info(f"Building Ghostty version {version}")
+
+    # Public key for signature validation
+    public_key = "untrusted comment: minisign public key 0x23149WL2sEpT\nRWQlAjJC23149WL2sEpT/l0QKy7hMIFhYdQOFy0Z7z7PbneUgvlsnYcV"
+
+    # Download files to current working directory
+    # Download Ghostty release
+    ghostty_url = f"https://release.files.ghostty.org/{version}/ghostty-{version}.tar.gz"
+    ghostty_archive = Path.cwd() / f"ghostty-{version}.tar.gz"
+    download_file(ghostty_url, ghostty_archive, pull_always)
+
+    # Download signature
+    signature_url = f"https://release.files.ghostty.org/{version}/ghostty-{version}.tar.gz.minisig"
+    signature_file = Path.cwd() / f"ghostty-{version}.tar.gz.minisig"
+    download_file(signature_url, signature_file, pull_always)
+
+    # Validate signature
+    if skip_signature:
+        log_warning("Skipping signature validation (not recommended)")
+    else:
+        if not validate_signature(ghostty_archive, signature_file, public_key):
+            log_error("Signature validation failed, aborting build")
+            sys.exit(1)
+
+    # Extract Ghostty
+    ghostty_dir = Path.cwd() / f"ghostty-{version}"
+    if ghostty_dir.exists():
+        import shutil
+        shutil.rmtree(ghostty_dir)
+
+    extract_tar_gz(ghostty_archive, Path.cwd())
+
+    if skip_build:
+        log_info("Skipping build and installation steps")
+        log_success(f"Ghostty source code extracted to {ghostty_dir}")
+        log_info("Use the script without --skip-build to build and install Ghostty")
+    else:
+        # Setup Zig compiler
+        compiler_dir = Path.cwd() / "compiler"
+        setup_zig(compiler_dir, pull_always)
+
+        # Build Ghostty
+        build_ghostty(ghostty_dir, compiler_dir)
+
+        # Install desktop file
+        install_desktop_file(ghostty_dir)
+
+        # Verify build
+        if verify_build():
+            log_success("Build verification passed!")
+            log_info("Ghostty has been successfully built and installed to $HOME/.local")
+        else:
+            log_error("Build verification failed!")
+            sys.exit(1)
+
+if __name__ == "__main__":
+    main()

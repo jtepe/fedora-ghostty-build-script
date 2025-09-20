@@ -1,0 +1,5 @@
+.venv
+*.tar.gz
+.tar.gz.minisig
+compiler
+ghostty*
