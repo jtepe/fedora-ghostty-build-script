@@ -284,6 +284,69 @@ def install_dolphin_desktop_file(ghostty_dir: Path) -> None:
     except Exception as e:
         log_error(f"Failed to install Dolphin service menu desktop file: {e}")
 
+def uninstall_ghostty() -> None:
+    """Remove all installed Ghostty artifacts."""
+    log_info("Uninstalling Ghostty...")
+    
+    removed_items = []
+    failed_items = []
+    
+    # Remove binary
+    ghostty_binary = Path.home() / '.local' / 'bin' / 'ghostty'
+    if ghostty_binary.exists():
+        try:
+            ghostty_binary.unlink()
+            removed_items.append(f"Binary: {ghostty_binary}")
+            log_success(f"Removed binary: {ghostty_binary}")
+        except Exception as e:
+            failed_items.append(f"Binary: {ghostty_binary} ({e})")
+            log_error(f"Failed to remove binary {ghostty_binary}: {e}")
+    else:
+        log_info("Binary not found, skipping removal")
+    
+    # Remove application desktop file
+    app_desktop = Path.home() / '.local' / 'share' / 'applications' / 'ghostty.desktop'
+    if app_desktop.exists():
+        try:
+            app_desktop.unlink()
+            removed_items.append(f"Application desktop file: {app_desktop}")
+            log_success(f"Removed application desktop file: {app_desktop}")
+        except Exception as e:
+            failed_items.append(f"Application desktop file: {app_desktop} ({e})")
+            log_error(f"Failed to remove application desktop file {app_desktop}: {e}")
+    else:
+        log_info("Application desktop file not found, skipping removal")
+    
+    # Remove Dolphin service menu desktop file
+    dolphin_desktop = Path.home() / '.local' / 'share' / 'kio' / 'servicemenus' / 'com.mitchellh.ghostty.desktop'
+    if dolphin_desktop.exists():
+        try:
+            dolphin_desktop.unlink()
+            removed_items.append(f"Dolphin service menu: {dolphin_desktop}")
+            log_success(f"Removed Dolphin service menu: {dolphin_desktop}")
+        except Exception as e:
+            failed_items.append(f"Dolphin service menu: {dolphin_desktop} ({e})")
+            log_error(f"Failed to remove Dolphin service menu {dolphin_desktop}: {e}")
+    else:
+        log_info("Dolphin service menu not found, skipping removal")
+    
+    # Summary
+    if removed_items:
+        log_success(f"Successfully removed {len(removed_items)} items:")
+        for item in removed_items:
+            log_info(f"  - {item}")
+    
+    if failed_items:
+        log_error(f"Failed to remove {len(failed_items)} items:")
+        for item in failed_items:
+            log_error(f"  - {item}")
+        sys.exit(1)
+    
+    if not removed_items and not failed_items:
+        log_warning("No Ghostty artifacts found to remove")
+    else:
+        log_success("Ghostty uninstallation completed successfully")
+
 def verify_build() -> bool:
     """Verify that the build artifacts are in $HOME/.local."""
     local_dir = Path.home() / '.local'
@@ -308,18 +371,22 @@ def main():
 Examples:
   %(prog)s                           # Build latest Ghostty (1.2.0)
   %(prog)s 1.1.5                     # Build specific version
+  %(prog)s --uninstall               # Remove all installed Ghostty artifacts
   %(prog)s --skip-build              # Only download and extract source
   %(prog)s --pull-always             # Force re-download all files
   %(prog)s --skip-signature          # Skip signature validation
   %(prog)s 1.2.0 --skip-build --pull-always  # Combine options
 
 The script downloads Ghostty source code, validates signatures, sets up Zig compiler,
-builds Ghostty, and installs it to $HOME/.local/bin.
+builds Ghostty, and installs it to $HOME/.local/bin. Use --uninstall to remove all
+installed artifacts.
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument('version', nargs='?', default='1.2.0',
                        help='Ghostty version to build (default: %(default)s)')
+    parser.add_argument('--uninstall', action='store_true',
+                       help='Remove all installed Ghostty artifacts (binary and desktop files)')
     parser.add_argument('--pull-always', action='store_true',
                        help='Always download files even if they already exist in the current directory')
     parser.add_argument('--skip-signature', action='store_true',
@@ -329,9 +396,15 @@ builds Ghostty, and installs it to $HOME/.local/bin.
 
     args = parser.parse_args()
     version = args.version
+    uninstall = args.uninstall
     pull_always = args.pull_always
     skip_signature = args.skip_signature
     skip_build = args.skip_build
+
+    # Handle uninstall flag precedence - takes precedence over all other flags
+    if uninstall:
+        uninstall_ghostty()
+        return
 
     log_info(f"Building Ghostty version {version}")
 
