@@ -211,41 +211,78 @@ def build_ghostty(ghostty_dir: Path, compiler_dir: Path) -> None:
         os.chdir(original_cwd)
 
 def install_desktop_file(ghostty_dir: Path) -> None:
-    """Copy and configure the desktop file for Ghostty."""
-    log_info("Installing desktop file...")
+    """Copy and configure the desktop files for Ghostty."""
+    log_info("Installing desktop files...")
+    
+    # Install main application desktop file
+    install_app_desktop_file(ghostty_dir)
+    
+    # Install KDE Dolphin service menu desktop file
+    install_dolphin_desktop_file(ghostty_dir)
 
+def install_app_desktop_file(ghostty_dir: Path) -> None:
+    """Install the main application desktop file."""
+    log_info("Installing application desktop file...")
+    
     # Source desktop file
-    source_desktop = ghostty_dir / "dist" / "linux" / "app.desktop.in"
+    source_desktop = ghostty_dir / "dist" / "linux" / "app.ghostty.in"
     if not source_desktop.exists():
         log_error(f"Desktop file not found at {source_desktop}")
         return
-
+    
     # Destination directory
     applications_dir = Path.home() / '.local' / 'share' / 'applications'
     applications_dir.mkdir(parents=True, exist_ok=True)
-
+    
     # Destination file
     dest_desktop = applications_dir / "ghostty.desktop"
-
+    
     try:
         # Read source file
         with open(source_desktop, 'r', encoding='utf-8') as f:
             content = f.read()
-
+        
         # Replace placeholders
         ghostty_path = str(Path.home() / '.local' / 'bin' / 'ghostty')
         content = content.replace('@GHOSTTY@', ghostty_path)
         content = content.replace('@NAME@', 'Ghostty')
         content = content.replace('@APPID@', 'com.mitchellh.ghostty')
-
+        
         # Write to destination
         with open(dest_desktop, 'w', encoding='utf-8') as f:
             f.write(content)
-
-        log_success(f"Desktop file installed to {dest_desktop}")
-
+        
+        log_success(f"Application desktop file installed to {dest_desktop}")
+        
     except Exception as e:
-        log_error(f"Failed to install desktop file: {e}")
+        log_error(f"Failed to install application desktop file: {e}")
+
+def install_dolphin_desktop_file(ghostty_dir: Path) -> None:
+    """Install the KDE Dolphin service menu desktop file."""
+    log_info("Installing Dolphin service menu desktop file...")
+    
+    # Source desktop file
+    source_desktop = ghostty_dir / "dist" / "linux" / "ghostty_dolphin.desktop"
+    if not source_desktop.exists():
+        log_error(f"Dolphin desktop file not found at {source_desktop}")
+        return
+    
+    # Destination directory
+    kio_dir = Path.home() / '.local' / 'share' / 'kio' / 'servicemenus'
+    kio_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Destination file
+    dest_desktop = kio_dir / "com.mitchellh.ghostty.desktop"
+    
+    try:
+        # Copy file without modifications
+        import shutil
+        shutil.copy2(source_desktop, dest_desktop)
+        
+        log_success(f"Dolphin service menu desktop file installed to {dest_desktop}")
+        
+    except Exception as e:
+        log_error(f"Failed to install Dolphin service menu desktop file: {e}")
 
 def verify_build() -> bool:
     """Verify that the build artifacts are in $HOME/.local."""
