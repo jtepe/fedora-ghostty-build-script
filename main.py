@@ -16,33 +16,39 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+
 # Color codes for terminal output
 class Colors:
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
-    BOLD = '\033[1m'
-    END = '\033[0m'
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    MAGENTA = "\033[95m"
+    CYAN = "\033[96m"
+    WHITE = "\033[97m"
+    BOLD = "\033[1m"
+    END = "\033[0m"
+
 
 def log_info(message: str) -> None:
     """Print info message with blue color."""
     print(f"{Colors.BLUE}[INFO]{Colors.END} {message}")
 
+
 def log_success(message: str) -> None:
     """Print success message with green color."""
     print(f"{Colors.GREEN}[SUCCESS]{Colors.END} {message}")
+
 
 def log_warning(message: str) -> None:
     """Print warning message with yellow color."""
     print(f"{Colors.YELLOW}[WARNING]{Colors.END} {message}")
 
+
 def log_error(message: str) -> None:
     """Print error message with red color."""
     print(f"{Colors.RED}[ERROR]{Colors.END} {message}")
+
 
 def download_file(url: str, destination: Path, pull_always: bool = False) -> None:
     """Download a file from URL to destination."""
@@ -59,48 +65,56 @@ def download_file(url: str, destination: Path, pull_always: bool = False) -> Non
         log_error(f"Failed to download {url}: {e}")
         sys.exit(1)
 
+
 def extract_tar_gz(archive_path: Path, extract_to: Path) -> None:
     """Extract a .tar.gz file to the specified directory."""
     log_info(f"Extracting {archive_path.name} to {extract_to}")
     try:
-        with tarfile.open(archive_path, 'r:gz') as tar:
+        with tarfile.open(archive_path, "r:gz") as tar:
             tar.extractall(extract_to)
         log_success(f"Extracted {archive_path.name}")
     except Exception as e:
         log_error(f"Failed to extract {archive_path}: {e}")
         sys.exit(1)
+
 
 def extract_tar_xz(archive_path: Path, extract_to: Path) -> None:
     """Extract a .tar.xz file to the specified directory."""
     log_info(f"Extracting {archive_path.name} to {extract_to}")
     try:
-        with tarfile.open(archive_path, 'r:xz') as tar:
+        with tarfile.open(archive_path, "r:xz") as tar:
             tar.extractall(extract_to)
         log_success(f"Extracted {archive_path.name}")
     except Exception as e:
         log_error(f"Failed to extract {archive_path}: {e}")
         sys.exit(1)
 
+
 def extract_zip(archive_path: Path, extract_to: Path) -> None:
     """Extract a .zip file to the specified directory."""
     log_info(f"Extracting {archive_path.name} to {extract_to}")
     try:
-        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+        with zipfile.ZipFile(archive_path, "r") as zip_ref:
             zip_ref.extractall(extract_to)
         log_success(f"Extracted {archive_path.name}")
     except Exception as e:
         log_error(f"Failed to extract {archive_path}: {e}")
         sys.exit(1)
 
-def validate_signature(archive_path: Path, signature_path: Path, public_key: str) -> bool:
+
+def validate_signature(
+    archive_path: Path, signature_path: Path, public_key: str
+) -> bool:
     """Validate the archive signature using minisign."""
     log_info("Validating signature...")
 
     # Check if minisign is available
     try:
-        subprocess.run(['minisign', '-v'], capture_output=True, check=True)
+        subprocess.run(["minisign", "-v"], capture_output=True, check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
-        log_error("minisign is not installed. Please install it to validate signatures.")
+        log_error(
+            "minisign is not installed. Please install it to validate signatures."
+        )
         log_info("On Ubuntu/Debian: sudo apt install minisign")
         log_info("On Fedora: sudo dnf install minisign")
         log_info("On macOS: brew install minisign")
@@ -108,7 +122,9 @@ def validate_signature(archive_path: Path, signature_path: Path, public_key: str
 
     try:
         # Create a temporary file for the public key
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.pub', delete=False) as key_file:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".pub", delete=False
+        ) as key_file:
             key_file.write(public_key)
             key_file_path = key_file.name
 
@@ -116,9 +132,11 @@ def validate_signature(archive_path: Path, signature_path: Path, public_key: str
         log_info(f"Using public key: {public_key[:50]}...")
 
         # Validate the signature
-        result = subprocess.run([
-            'minisign', '-V', '-p', key_file_path, '-m', str(archive_path)
-        ], capture_output=True, text=True)
+        result = subprocess.run(
+            ["minisign", "-V", "-p", key_file_path, "-m", str(archive_path)],
+            capture_output=True,
+            text=True,
+        )
 
         # Clean up the temporary key file
         os.unlink(key_file_path)
@@ -134,6 +152,7 @@ def validate_signature(archive_path: Path, signature_path: Path, public_key: str
     except Exception as e:
         log_error(f"Error during signature validation: {e}")
         return False
+
 
 def setup_zig(compiler_dir: Path, pull_always: bool = False) -> None:
     """Download and setup Zig compiler if not already present."""
@@ -170,11 +189,13 @@ def setup_zig(compiler_dir: Path, pull_always: bool = False) -> None:
         if lib_src.exists():
             if lib_dst.exists():
                 import shutil
+
                 shutil.rmtree(lib_dst)
             lib_src.rename(lib_dst)
 
         # Clean up extracted directory
         import shutil
+
         shutil.rmtree(extracted_dir)
 
     # Clean up archive
@@ -182,13 +203,14 @@ def setup_zig(compiler_dir: Path, pull_always: bool = False) -> None:
 
     log_success("Zig compiler setup complete")
 
+
 def build_ghostty(ghostty_dir: Path, compiler_dir: Path) -> None:
     """Build Ghostty using Zig."""
     log_info("Building Ghostty...")
 
     # Set up environment
     env = os.environ.copy()
-    env['PATH'] = f"{compiler_dir}:{env.get('PATH', '')}"
+    env["PATH"] = f"{compiler_dir}:{env.get('PATH', '')}"
 
     # Change to ghostty directory
     original_cwd = os.getcwd()
@@ -196,9 +218,18 @@ def build_ghostty(ghostty_dir: Path, compiler_dir: Path) -> None:
 
     try:
         # Run the build command
-        result = subprocess.run([
-            'zig', 'build', '-p', str(Path.home() / '.local'), '-Doptimize=ReleaseFast',
-        ], env=env, capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                "zig",
+                "build",
+                "-p",
+                str(Path.home() / ".local"),
+                "-Doptimize=ReleaseFast",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
 
         if result.returncode != 0:
             log_error("Build failed!")
@@ -210,6 +241,7 @@ def build_ghostty(ghostty_dir: Path, compiler_dir: Path) -> None:
     finally:
         os.chdir(original_cwd)
 
+
 def install_desktop_file(ghostty_dir: Path) -> None:
     """Copy and configure the desktop files for Ghostty."""
     log_info("Installing desktop files...")
@@ -219,6 +251,7 @@ def install_desktop_file(ghostty_dir: Path) -> None:
 
     # Install KDE Dolphin service menu desktop file
     install_dolphin_desktop_file(ghostty_dir)
+
 
 def install_app_desktop_file(ghostty_dir: Path) -> None:
     """Install the main application desktop file."""
@@ -231,7 +264,7 @@ def install_app_desktop_file(ghostty_dir: Path) -> None:
         return
 
     # Destination directory
-    applications_dir = Path.home() / '.local' / 'share' / 'applications'
+    applications_dir = Path.home() / ".local" / "share" / "applications"
     applications_dir.mkdir(parents=True, exist_ok=True)
 
     # Destination file
@@ -239,23 +272,24 @@ def install_app_desktop_file(ghostty_dir: Path) -> None:
 
     try:
         # Read source file
-        with open(source_desktop, 'r', encoding='utf-8') as f:
+        with open(source_desktop, "r", encoding="utf-8") as f:
             content = f.read()
 
         # Replace placeholders
-        ghostty_path = str(Path.home() / '.local' / 'bin' / 'ghostty')
-        content = content.replace('@GHOSTTY@', ghostty_path)
-        content = content.replace('@NAME@', 'Ghostty')
-        content = content.replace('@APPID@', 'com.mitchellh.ghostty')
+        ghostty_path = str(Path.home() / ".local" / "bin" / "ghostty")
+        content = content.replace("@GHOSTTY@", ghostty_path)
+        content = content.replace("@NAME@", "Ghostty")
+        content = content.replace("@APPID@", "com.mitchellh.ghostty")
 
         # Write to destination
-        with open(dest_desktop, 'w', encoding='utf-8') as f:
+        with open(dest_desktop, "w", encoding="utf-8") as f:
             f.write(content)
 
         log_success(f"Application desktop file installed to {dest_desktop}")
 
     except Exception as e:
         log_error(f"Failed to install application desktop file: {e}")
+
 
 def install_dolphin_desktop_file(ghostty_dir: Path) -> None:
     """Install the KDE Dolphin service menu desktop file."""
@@ -268,7 +302,7 @@ def install_dolphin_desktop_file(ghostty_dir: Path) -> None:
         return
 
     # Destination directory
-    kio_dir = Path.home() / '.local' / 'share' / 'kio' / 'servicemenus'
+    kio_dir = Path.home() / ".local" / "share" / "kio" / "servicemenus"
     kio_dir.mkdir(parents=True, exist_ok=True)
 
     # Destination file
@@ -277,12 +311,14 @@ def install_dolphin_desktop_file(ghostty_dir: Path) -> None:
     try:
         # Copy file without modifications
         import shutil
+
         shutil.copy2(source_desktop, dest_desktop)
 
         log_success(f"Dolphin service menu desktop file installed to {dest_desktop}")
 
     except Exception as e:
         log_error(f"Failed to install Dolphin service menu desktop file: {e}")
+
 
 def uninstall_ghostty() -> None:
     """Remove all installed Ghostty artifacts."""
@@ -292,7 +328,7 @@ def uninstall_ghostty() -> None:
     failed_items = []
 
     # Remove binary
-    ghostty_binary = Path.home() / '.local' / 'bin' / 'ghostty'
+    ghostty_binary = Path.home() / ".local" / "bin" / "ghostty"
     if ghostty_binary.exists():
         try:
             ghostty_binary.unlink()
@@ -305,7 +341,7 @@ def uninstall_ghostty() -> None:
         log_info("Binary not found, skipping removal")
 
     # Remove application desktop file
-    app_desktop = Path.home() / '.local' / 'share' / 'applications' / 'ghostty.desktop'
+    app_desktop = Path.home() / ".local" / "share" / "applications" / "ghostty.desktop"
     if app_desktop.exists():
         try:
             app_desktop.unlink()
@@ -318,7 +354,14 @@ def uninstall_ghostty() -> None:
         log_info("Application desktop file not found, skipping removal")
 
     # Remove Dolphin service menu desktop file
-    dolphin_desktop = Path.home() / '.local' / 'share' / 'kio' / 'servicemenus' / 'com.mitchellh.ghostty.desktop'
+    dolphin_desktop = (
+        Path.home()
+        / ".local"
+        / "share"
+        / "kio"
+        / "servicemenus"
+        / "com.mitchellh.ghostty.desktop"
+    )
     if dolphin_desktop.exists():
         try:
             dolphin_desktop.unlink()
@@ -347,15 +390,16 @@ def uninstall_ghostty() -> None:
     else:
         log_success("Ghostty uninstallation completed successfully")
 
+
 def verify_build() -> bool:
     """Verify that the build artifacts are in $HOME/.local."""
-    local_dir = Path.home() / '.local'
-    bin_dir = local_dir / 'bin'
+    local_dir = Path.home() / ".local"
+    bin_dir = local_dir / "bin"
 
     log_info("Verifying build artifacts...")
 
     # Check if ghostty binary exists
-    ghostty_binary = bin_dir / 'ghostty'
+    ghostty_binary = bin_dir / "ghostty"
     if ghostty_binary.exists():
         log_success(f"Ghostty binary found at {ghostty_binary}")
         return True
@@ -363,11 +407,12 @@ def verify_build() -> bool:
         log_error(f"Ghostty binary not found at {ghostty_binary}")
         return False
 
+
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(
-        description='Build Ghostty terminal application',
-        epilog='''
+        description="Build Ghostty terminal application",
+        epilog="""
 Examples:
   %(prog)s                           # Build latest Ghostty (1.2.0)
   %(prog)s 1.1.5                     # Build specific version
@@ -380,19 +425,35 @@ Examples:
 The script downloads Ghostty source code, validates signatures, sets up Zig compiler,
 builds Ghostty, and installs it to $HOME/.local/bin. Use --uninstall to remove all
 installed artifacts.
-        ''',
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument('version', nargs='?', default='1.2.0',
-                       help='Ghostty version to build (default: %(default)s)')
-    parser.add_argument('--uninstall', action='store_true',
-                       help='Remove all installed Ghostty artifacts (binary and desktop files)')
-    parser.add_argument('--pull-always', action='store_true',
-                       help='Always download files even if they already exist in the current directory')
-    parser.add_argument('--skip-signature', action='store_true',
-                       help='Skip signature validation (not recommended for security)')
-    parser.add_argument('--skip-build', action='store_true',
-                       help='Skip build and installation steps (only download and extract source code)')
+    parser.add_argument(
+        "version",
+        nargs="?",
+        default="1.2.0",
+        help="Ghostty version to build (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--uninstall",
+        action="store_true",
+        help="Remove all installed Ghostty artifacts (binary and desktop files)",
+    )
+    parser.add_argument(
+        "--pull-always",
+        action="store_true",
+        help="Always download files even if they already exist in the current directory",
+    )
+    parser.add_argument(
+        "--skip-signature",
+        action="store_true",
+        help="Skip signature validation (not recommended for security)",
+    )
+    parser.add_argument(
+        "--skip-build",
+        action="store_true",
+        help="Skip build and installation steps (only download and extract source code)",
+    )
 
     args = parser.parse_args()
     version = args.version
@@ -413,12 +474,16 @@ installed artifacts.
 
     # Download files to current working directory
     # Download Ghostty release
-    ghostty_url = f"https://release.files.ghostty.org/{version}/ghostty-{version}.tar.gz"
+    ghostty_url = (
+        f"https://release.files.ghostty.org/{version}/ghostty-{version}.tar.gz"
+    )
     ghostty_archive = Path.cwd() / f"ghostty-{version}.tar.gz"
     download_file(ghostty_url, ghostty_archive, pull_always)
 
     # Download signature
-    signature_url = f"https://release.files.ghostty.org/{version}/ghostty-{version}.tar.gz.minisig"
+    signature_url = (
+        f"https://release.files.ghostty.org/{version}/ghostty-{version}.tar.gz.minisig"
+    )
     signature_file = Path.cwd() / f"ghostty-{version}.tar.gz.minisig"
     download_file(signature_url, signature_file, pull_always)
 
@@ -434,6 +499,7 @@ installed artifacts.
     ghostty_dir = Path.cwd() / f"ghostty-{version}"
     if ghostty_dir.exists():
         import shutil
+
         shutil.rmtree(ghostty_dir)
 
     extract_tar_gz(ghostty_archive, Path.cwd())
@@ -456,10 +522,13 @@ installed artifacts.
         # Verify build
         if verify_build():
             log_success("Build verification passed!")
-            log_info("Ghostty has been successfully built and installed to $HOME/.local")
+            log_info(
+                "Ghostty has been successfully built and installed to $HOME/.local"
+            )
         else:
             log_error("Build verification failed!")
             sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
