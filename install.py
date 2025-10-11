@@ -115,9 +115,7 @@ def validate_signature(
         log_error(
             "minisign is not installed. Please install it to validate signatures."
         )
-        log_info("On Ubuntu/Debian: sudo apt install minisign")
-        log_info("On Fedora: sudo dnf install minisign")
-        log_info("On macOS: brew install minisign")
+        log_info("Install with: sudo dnf install minisign")
         sys.exit(1)
 
     try:
@@ -154,7 +152,7 @@ def validate_signature(
         return False
 
 
-def setup_zig(compiler_dir: Path, pull_always: bool = False) -> None:
+def setup_zig(compiler_dir: Path, zig_version: str, pull_always: bool = False) -> None:
     """Download and setup Zig compiler if not already present."""
     zig_binary = compiler_dir / "zig"
 
@@ -162,13 +160,13 @@ def setup_zig(compiler_dir: Path, pull_always: bool = False) -> None:
         log_info("Zig compiler already exists, skipping download")
         return
 
-    log_info("Setting up Zig compiler...")
+    log_info(f"Setting up Zig compiler version {zig_version}...")
 
     # Create compiler directory
     compiler_dir.mkdir(exist_ok=True)
 
     # Download Zig
-    zig_url = "https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz"
+    zig_url = f"https://ziglang.org/download/{zig_version}/zig-x86_64-linux-{zig_version}.tar.xz"
     zig_archive = compiler_dir / "zig.tar.xz"
 
     download_file(zig_url, zig_archive, pull_always)
@@ -176,7 +174,7 @@ def setup_zig(compiler_dir: Path, pull_always: bool = False) -> None:
     # Extract Zig
     extract_tar_xz(zig_archive, compiler_dir)
     # Move zig binary and lib directory to the correct location
-    extracted_dir = compiler_dir / "zig-x86_64-linux-0.14.1"
+    extracted_dir = compiler_dir / f"zig-x86_64-linux-{zig_version}"
     if extracted_dir.exists():
         # Move zig binary
         zig_src = extracted_dir / "zig"
@@ -408,6 +406,193 @@ def verify_build() -> bool:
         return False
 
 
+def check_podman() -> bool:
+    """Check if podman is available."""
+    try:
+        subprocess.run(
+            ["podman", "--version"], capture_output=True, check=True, text=True
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        log_error("podman is not installed. Please install it to use --container")
+        log_info("Install with: sudo dnf install podman")
+        return False
+
+
+def extract_artifacts_from_container(
+    container_name: str, version: str, temp_dir: Path
+) -> tuple[Path, Path]:
+    """Extract binary and desktop files from container.
+    
+    Returns: (binary_path, dist_dir_path)
+    """
+    log_info("Extracting binary from container...")
+    
+    # Extract binary
+    binary_path = temp_dir / "ghostty"
+    result = subprocess.run(
+        [
+            "podman",
+            "cp",
+            f"{container_name}:/build/output/bin/ghostty",
+            str(binary_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    
+    if result.returncode != 0:
+        log_error(f"Failed to extract binary from container: {result.stderr}")
+        raise RuntimeError("Binary extraction failed")
+    
+    log_success("Binary extracted successfully")
+    
+    # Extract desktop files
+    log_info("Extracting desktop files from container...")
+    dist_dir = temp_dir / "dist"
+    result = subprocess.run(
+        [
+            "podman",
+            "cp",
+            f"{container_name}:/build/ghostty-{version}/dist",
+            str(dist_dir),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    
+    if result.returncode != 0:
+        log_error(f"Failed to extract desktop files from container: {result.stderr}")
+        raise RuntimeError("Desktop files extraction failed")
+    
+    log_success("Desktop files extracted successfully")
+    
+    return binary_path, dist_dir
+
+
+def build_ghostty_container(
+    version: str, zig_version: str, no_cache: bool
+) -> None:
+    """Build Ghostty using container and install artifacts."""
+    import shutil
+    import random
+    import string
+    
+    # Check if podman is available
+    if not check_podman():
+        sys.exit(1)
+    
+    # Check if Containerfile exists
+    containerfile = Path.cwd() / "Containerfile"
+    if not containerfile.exists():
+        log_error(f"Containerfile not found at {containerfile}")
+        log_error("Please ensure Containerfile is in the current directory")
+        sys.exit(1)
+    
+    log_info(f"Building Ghostty {version} using container with Zig {zig_version}...")
+    
+    # Build container image
+    log_info("Building container image (this may take a few minutes)...")
+    build_cmd = [
+        "podman",
+        "build",
+        "-t",
+        f"ghostty-builder:{version}",
+        "--build-arg",
+        f"GHOSTTY_VERSION={version}",
+        "--build-arg",
+        f"ZIG_VERSION={zig_version}",
+        "-f",
+        "Containerfile",
+        ".",
+    ]
+    
+    if no_cache:
+        build_cmd.insert(2, "--no-cache")
+    
+    result = subprocess.run(build_cmd, capture_output=False, text=True)
+    
+    if result.returncode != 0:
+        log_error("Container build failed!")
+        sys.exit(1)
+    
+    log_success("Container image built successfully")
+    
+    # Generate random suffix for container name
+    random_suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    container_name = f"ghostty-extract-{random_suffix}"
+    
+    # Create temporary directory for extraction
+    temp_dir = Path(tempfile.mkdtemp(prefix="ghostty-container-"))
+    
+    try:
+        # Create container instance
+        log_info("Creating temporary container for artifact extraction...")
+        result = subprocess.run(
+            [
+                "podman",
+                "create",
+                "--name",
+                container_name,
+                f"ghostty-builder:{version}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        
+        if result.returncode != 0:
+            log_error(f"Failed to create container: {result.stderr}")
+            sys.exit(1)
+        
+        try:
+            # Extract artifacts
+            binary_path, dist_dir = extract_artifacts_from_container(
+                container_name, version, temp_dir
+            )
+            
+            # Install binary
+            log_info("Installing binary to ~/.local/bin...")
+            bin_dir = Path.home() / ".local" / "bin"
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            
+            dest_binary = bin_dir / "ghostty"
+            shutil.copy2(binary_path, dest_binary)
+            dest_binary.chmod(0o755)  # Make executable
+            
+            log_success(f"Binary installed to {dest_binary}")
+            
+            # Install desktop files
+            log_info("Installing desktop files...")
+            # Create a temporary ghostty directory structure for install_desktop_file
+            ghostty_temp_dir = temp_dir / "ghostty-source"
+            ghostty_temp_dir.mkdir(exist_ok=True)
+            shutil.move(str(dist_dir), str(ghostty_temp_dir / "dist"))
+            
+            install_desktop_file(ghostty_temp_dir)
+            
+        finally:
+            # Remove container
+            log_info("Cleaning up container...")
+            subprocess.run(
+                ["podman", "rm", container_name],
+                capture_output=True,
+            )
+            log_success("Container removed")
+    
+    finally:
+        # Clean up temporary directory
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+    
+    # Verify installation
+    if verify_build():
+        log_success("Container build verification passed!")
+        log_info("Ghostty has been successfully built and installed to $HOME/.local")
+    else:
+        log_error("Container build verification failed!")
+        sys.exit(1)
+
+
 def main():
     """Main function."""
     parser = argparse.ArgumentParser(
@@ -417,6 +602,8 @@ Examples:
   %(prog)s                           # Build latest Ghostty (1.2.0)
   %(prog)s 1.1.5                     # Build specific version
   %(prog)s --uninstall               # Remove all installed Ghostty artifacts
+  %(prog)s --container               # Build using container (requires podman)
+  %(prog)s --container --zig-version 0.13.0  # Container build with custom Zig version
   %(prog)s --skip-build              # Only download and extract source
   %(prog)s --pull-always             # Force re-download all files
   %(prog)s --skip-signature          # Skip signature validation
@@ -424,7 +611,8 @@ Examples:
 
 The script downloads Ghostty source code, validates signatures, sets up Zig compiler,
 builds Ghostty, and installs it to $HOME/.local/bin. Use --uninstall to remove all
-installed artifacts.
+installed artifacts. Use --container to build in a container without installing build
+dependencies locally.
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -438,6 +626,21 @@ installed artifacts.
         "--uninstall",
         action="store_true",
         help="Remove all installed Ghostty artifacts (binary and desktop files)",
+    )
+    parser.add_argument(
+        "--container",
+        action="store_true",
+        help="Build Ghostty using container (requires podman)",
+    )
+    parser.add_argument(
+        "--zig-version",
+        default="0.14.1",
+        help="Zig compiler version to use (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Force container rebuild without cache (only used with --container)",
     )
     parser.add_argument(
         "--pull-always",
@@ -458,6 +661,9 @@ installed artifacts.
     args = parser.parse_args()
     version = args.version
     uninstall = args.uninstall
+    container = args.container
+    zig_version = args.zig_version
+    no_cache = args.no_cache
     pull_always = args.pull_always
     skip_signature = args.skip_signature
     skip_build = args.skip_build
@@ -465,6 +671,26 @@ installed artifacts.
     # Handle uninstall flag precedence - takes precedence over all other flags
     if uninstall:
         uninstall_ghostty()
+        return
+
+    # Handle container build
+    if container:
+        # Log warnings for ignored flags
+        if skip_build:
+            log_warning("--skip-build ignored when using --container")
+        if skip_signature:
+            log_warning(
+                "--skip-signature ignored when using --container (signature always verified)"
+            )
+        if pull_always:
+            log_warning(
+                "--pull-always ignored when using --container (always downloads fresh)"
+            )
+        if no_cache:
+            log_info("Using --no-cache: container will be rebuilt without cache")
+        
+        # Execute container workflow
+        build_ghostty_container(version, zig_version, no_cache)
         return
 
     log_info(f"Building Ghostty version {version}")
@@ -511,7 +737,7 @@ installed artifacts.
     else:
         # Setup Zig compiler
         compiler_dir = Path.cwd() / "compiler"
-        setup_zig(compiler_dir, pull_always)
+        setup_zig(compiler_dir, zig_version, pull_always)
 
         # Build Ghostty
         build_ghostty(ghostty_dir, compiler_dir)
