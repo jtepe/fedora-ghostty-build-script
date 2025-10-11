@@ -14,6 +14,7 @@ RUN dnf install -y \
     gcc \
     gcc-c++ \
     oniguruma-devel \
+    minisign \
     && dnf clean all
 
 # Install curl and unzip for downloading Zig
@@ -41,8 +42,12 @@ RUN chown -R builder:builder /build
 USER builder
 
 # Download and extract Ghostty source
+ENV GHOSTTY_PUB_KEY=RWQlAjJC23149WL2sEpT/l0QKy7hMIFhYdQOFy0Z7z7PbneUgvlsnYcV
 ARG GHOSTTY_VERSION=1.2.0
-RUN curl -sL https://release.files.ghostty.org/${GHOSTTY_VERSION}/ghostty-${GHOSTTY_VERSION}.tar.gz -o ghostty.tar.gz \
+RUN curl -sL https://release.files.ghostty.org/${GHOSTTY_VERSION}/ghostty-${GHOSTTY_VERSION}.tar.gz -O \
+    && curl -sL https://release.files.ghostty.org/${GHOSTTY_VERSION}/ghostty-${GHOSTTY_VERSION}.tar.gz.minisig -O \
+    && minisign -Vm ghostty-${GHOSTTY_VERSION}.tar.gz -P ${GHOSTTY_PUB_KEY} \
+    && mv ghostty-${GHOSTTY_VERSION}.tar.gz ghostty.tar.gz \
     && tar -xzf ghostty.tar.gz \
     && rm ghostty.tar.gz
 
