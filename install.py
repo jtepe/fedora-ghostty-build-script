@@ -423,11 +423,11 @@ def extract_artifacts_from_container(
     container_name: str, version: str, temp_dir: Path
 ) -> tuple[Path, Path]:
     """Extract binary and desktop files from container.
-    
+
     Returns: (binary_path, dist_dir_path)
     """
     log_info("Extracting binary from container...")
-    
+
     # Extract binary
     binary_path = temp_dir / "ghostty"
     result = subprocess.run(
@@ -440,13 +440,13 @@ def extract_artifacts_from_container(
         capture_output=True,
         text=True,
     )
-    
+
     if result.returncode != 0:
         log_error(f"Failed to extract binary from container: {result.stderr}")
         raise RuntimeError("Binary extraction failed")
-    
+
     log_success("Binary extracted successfully")
-    
+
     # Extract desktop files
     log_info("Extracting desktop files from container...")
     dist_dir = temp_dir / "dist"
@@ -460,13 +460,13 @@ def extract_artifacts_from_container(
         capture_output=True,
         text=True,
     )
-    
+
     if result.returncode != 0:
         log_error(f"Failed to extract desktop files from container: {result.stderr}")
         raise RuntimeError("Desktop files extraction failed")
-    
+
     log_success("Desktop files extracted successfully")
-    
+
     return binary_path, dist_dir
 
 
@@ -477,22 +477,21 @@ def build_ghostty_container(
     import shutil
     import random
     import string
-    
+
     # Check if podman is available
     if not check_podman():
         sys.exit(1)
-    
+
     # Check if Containerfile exists
     containerfile = Path.cwd() / "Containerfile"
     if not containerfile.exists():
         log_error(f"Containerfile not found at {containerfile}")
         log_error("Please ensure Containerfile is in the current directory")
         sys.exit(1)
-    
+
     log_info(f"Building Ghostty {version} using container with Zig {zig_version}...")
-    
+
     # Build container image
-    log_info("Building container image (this may take a few minutes)...")
     build_cmd = [
         "podman",
         "build",
@@ -506,25 +505,30 @@ def build_ghostty_container(
         "Containerfile",
         ".",
     ]
-    
+
     if no_cache:
         build_cmd.insert(2, "--no-cache")
-    
-    result = subprocess.run(build_cmd, capture_output=False, text=True)
-    
+
+    log_info("Building container image (this may take a few minutes)...")
+    result = subprocess.run(build_cmd, capture_output=True, text=True)
+
     if result.returncode != 0:
         log_error("Container build failed!")
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
         sys.exit(1)
-    
+
     log_success("Container image built successfully")
-    
+
     # Generate random suffix for container name
     random_suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
     container_name = f"ghostty-extract-{random_suffix}"
-    
+
     # Create temporary directory for extraction
     temp_dir = Path(tempfile.mkdtemp(prefix="ghostty-container-"))
-    
+
     try:
         # Create container instance
         log_info("Creating temporary container for artifact extraction...")
@@ -539,37 +543,37 @@ def build_ghostty_container(
             capture_output=True,
             text=True,
         )
-        
+
         if result.returncode != 0:
             log_error(f"Failed to create container: {result.stderr}")
             sys.exit(1)
-        
+
         try:
             # Extract artifacts
             binary_path, dist_dir = extract_artifacts_from_container(
                 container_name, version, temp_dir
             )
-            
+
             # Install binary
             log_info("Installing binary to ~/.local/bin...")
             bin_dir = Path.home() / ".local" / "bin"
             bin_dir.mkdir(parents=True, exist_ok=True)
-            
+
             dest_binary = bin_dir / "ghostty"
             shutil.copy2(binary_path, dest_binary)
             dest_binary.chmod(0o755)  # Make executable
-            
+
             log_success(f"Binary installed to {dest_binary}")
-            
+
             # Install desktop files
             log_info("Installing desktop files...")
             # Create a temporary ghostty directory structure for install_desktop_file
             ghostty_temp_dir = temp_dir / "ghostty-source"
             ghostty_temp_dir.mkdir(exist_ok=True)
             shutil.move(str(dist_dir), str(ghostty_temp_dir / "dist"))
-            
+
             install_desktop_file(ghostty_temp_dir)
-            
+
         finally:
             # Remove container
             log_info("Cleaning up container...")
@@ -578,12 +582,12 @@ def build_ghostty_container(
                 capture_output=True,
             )
             log_success("Container removed")
-    
+
     finally:
         # Clean up temporary directory
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
-    
+
     # Verify installation
     if verify_build():
         log_success("Container build verification passed!")
@@ -688,7 +692,7 @@ dependencies locally.
             )
         if no_cache:
             log_info("Using --no-cache: container will be rebuilt without cache")
-        
+
         # Execute container workflow
         build_ghostty_container(version, zig_version, no_cache)
         return
