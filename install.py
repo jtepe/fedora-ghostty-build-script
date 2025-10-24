@@ -565,8 +565,6 @@ def build_ghostty_container(
 
             log_success(f"Binary installed to {dest_binary}")
 
-            # Install desktop files
-            log_info("Installing desktop files...")
             # Create a temporary ghostty directory structure for install_desktop_file
             ghostty_temp_dir = temp_dir / "ghostty-source"
             ghostty_temp_dir.mkdir(exist_ok=True)
